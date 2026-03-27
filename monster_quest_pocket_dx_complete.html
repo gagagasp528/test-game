@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Monster Quest Pocket DX Complete</title>
+<style>
+  :root{
+    --bg:#0f1218; --panel:#f5efe2; --ink:#141414; --line:#202020; --blue:#2f6bf2;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}
+  body{display:flex;justify-content:center}
+  .app{width:100%;max-width:1080px;padding:8px;display:flex;flex-direction:column;gap:8px}
+  .bar,.help{background:#171b22;color:#eef2f7;border:1px solid #2a2f39;border-radius:12px;padding:10px 12px}
+  .bar{font-weight:800}
+  .help{font-size:12px;line-height:1.45;color:#cfd6df}
+  canvas{width:100%;height:auto;display:block;background:#000;border:2px solid #2b313d;border-radius:14px;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none}
+  .touch{
+    position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;
+    padding:12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    pointer-events:none;gap:10px;
+  }
+  .dpad,.ab,.menu{pointer-events:auto;display:grid;gap:8px}
+  .dpad{grid-template-columns:62px 62px 62px;grid-template-rows:62px 62px 62px}
+  .ab{grid-template-columns:72px 72px}
+  .menu{grid-template-columns:74px}
+  .btn{
+    border:none;border-radius:18px;min-width:62px;min-height:62px;color:#fff;font-weight:800;font-size:18px;
+    background:rgba(255,255,255,.14);backdrop-filter:blur(8px);
+    box-shadow:0 6px 18px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.22);
+    user-select:none;
+  }
+  .btn.small{min-height:48px;font-size:14px}
+  .btn.active,.btn:active{transform:scale(.98);background:rgba(255,255,255,.24)}
+  .ghost{visibility:hidden}
+  @media (min-width: 961px){ .touch{max-width:1080px;left:50%;transform:translateX(-50%)} }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">Monster Quest Pocket DX Complete</div>
+  <div class="help">PC: 矢印/WASD移動 / Z=A 決定 / X=B 戻る / C=MENU。スマホは下の十字キーとA/B/MENU。タイトル、複数マップ、家の中、トレーナー戦、PP、状態異常、セーブ、ショップ、センター、図鑑、手持ち6体まで対応。ファイルプレビューで動かない場合はSafari等のブラウザで開いてください。</div>
+  <canvas id="game" width="960" height="640"></canvas>
+</div>
+
+<div class="touch">
+  <div class="dpad">
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="arrowup">▲</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="arrowleft">◀</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="arrowright">▶</button>
+    <button class="btn ghost"></button>
+    <button class="btn" data-key="arrowdown">▼</button>
+    <button class="btn ghost"></button>
+  </div>
+  <div class="menu">
+    <button class="btn small" data-key="c">MENU</button>
+    <button class="btn small" data-key="x">B</button>
+  </div>
+  <div class="ab">
+    <button class="btn" data-key="x">B</button>
+    <button class="btn" data-key="z">A</button>
+  </div>
+</div>
+
+<script>
+(() => {
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+const W=canvas.width,H=canvas.height,TILE=32;
+
+const keys={}, justPressed=new Set();
+function tapKey(k,on){
+  k=(k||"").toLowerCase();
+  if(on){ if(!keys[k]) justPressed.add(k); keys[k]=true; } else keys[k]=false;
+}
+window.addEventListener("keydown",e=>{
+  let k=e.key.toLowerCase();
+  if(["arrowup","arrowdown","arrowleft","arrowright"," ","enter","tab"].includes(k)) e.preventDefault();
+  if(k===" ") k="z";
+  if(k==="enter") k="z";
+  tapKey(k,true);
+});
+window.addEventListener("keyup",e=>{
+  let k=e.key.toLowerCase();
+  if(k===" ") k="z";
+  if(k==="enter") k="z";
+  tapKey(k,false);
+});
+document.querySelectorAll("[data-key]").forEach(btn=>{
+  const k=btn.dataset.key;
+  const down=e=>{e.preventDefault();btn.classList.add("active");tapKey(k,true);};
+  const up=e=>{e.preventDefault();btn.classList.remove("active");tapKey(k,false);};
+  btn.addEventListener("pointerdown",down);
+  btn.addEventListener("pointerup",up);
+  btn.addEventListener("pointercancel",up);
+  btn.addEventListener("pointerleave",up);
+});
+const pressed=(...k)=>k.some(x=>justPressed.has(x));
+const held=(...k)=>k.some(x=>keys[x]);
+const rand=n=>Math.floor(Math.random()*n);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+const TYPE_COLORS={water:"#5ba9ff",fire:"#ff924a",grass:"#4ed66a",normal:"#d7d7d7"};
+const typeChart={
+  water:{fire:1.5,grass:0.75,water:0.85,normal:1},
+  fire:{grass:1.5,water:0.75,fire:0.85,normal:1},
+  grass:{water:1.5,fire:0.75,grass:0.85,normal:1},
+  normal:{water:1,fire:1,grass:1,normal:1}
+};
+const storageKey="monster_quest_pocket_dx_complete";
+let storageAvailable=true;
+function saveToStorage(data){ try{ localStorage.setItem(storageKey, JSON.stringify(data)); } catch(e){ storageAvailable=false; } }
+function loadFromStorage(){ try{ const raw=localStorage.getItem(storageKey); return raw?JSON.parse(raw):null; } catch(e){ storageAvailable=false; return null; } }
+
+const species = {
+  mizumaru:{id:"mizumaru",name:"ミズマル",type:"water",color:"#60a5fa",baseHp:38,evolveLevel:6,evolveTo:"mizuron",
+    moves:[["たいあたり",8,"normal",25],["みずでっぽう",12,"water",20],["バブル",14,"water",15],["ねむりミスト",0,"water",10,"sleep"]]},
+  mizuron:{id:"mizuron",name:"ミズロン",type:"water",color:"#2563eb",baseHp:52,
+    moves:[["たいあたり",10,"normal",25],["みずでっぽう",16,"water",20],["アクアスラッシュ",20,"water",15],["ねむりミスト",0,"water",10,"sleep"]]},
+  hibany:{id:"hibany",name:"ヒバニー",type:"fire",color:"#fb923c",baseHp:34,evolveLevel:6,evolveTo:"hibalord",
+    moves:[["ひっかく",8,"normal",25],["ひのこ",12,"fire",20],["かえんキック",16,"fire",15],["どくえん",0,"fire",10,"poison"]]},
+  hibalord:{id:"hibalord",name:"ヒバロード",type:"fire",color:"#ea580c",baseHp:48,
+    moves:[["ひっかく",10,"normal",25],["ひのこ",16,"fire",20],["フレアタックル",22,"fire",10],["どくえん",0,"fire",10,"poison"]]},
+  happaru:{id:"happaru",name:"ハッパル",type:"grass",color:"#4ade80",baseHp:36,evolveLevel:6,evolveTo:"happadon",
+    moves:[["たいあたり",8,"normal",25],["つるのムチ",12,"grass",20],["はっぱカッター",16,"grass",15],["ねむりごな",0,"grass",10,"sleep"]]},
+  happadon:{id:"happadon",name:"ハッパドン",type:"grass",color:"#16a34a",baseHp:50,
+    moves:[["たいあたり",10,"normal",25],["つるのムチ",16,"grass",20],["リーフスラッシュ",22,"grass",10],["ねむりごな",0,"grass",10,"sleep"]]},
+};
+
+function makeMove(arr){ return {name:arr[0],power:arr[1],type:arr[2],maxPP:arr[3],pp:arr[3],status:arr[4]||null}; }
+function makeMon(id, level=5){
+  const s=species[id];
+  const maxHp=s.baseHp + level*4;
+  return {
+    uid:Math.random().toString(36).slice(2,9),
+    speciesId:id,nickname:s.name,level,exp:0,hp:maxHp,maxHp,
+    status:null,statusTurns:0,
+    moves:s.moves.map(makeMove)
+  };
+}
+function cloneMon(m){ return JSON.parse(JSON.stringify(m)); }
+function sp(mon){ return species[mon.speciesId]; }
+function mname(mon){ return mon.nickname || sp(mon).name; }
+function mtype(mon){ return sp(mon).type; }
+function mcolor(mon){ return sp(mon).color; }
+function nextExp(mon){ return 24 + (mon.level-1)*2; }
+function fullHeal(mon){ mon.hp=mon.maxHp; mon.status=null; mon.statusTurns=0; mon.moves.forEach(x=>x.pp=x.maxPP); }
+function fullHealParty(){ state.player.party.forEach(fullHeal); }
+
+function defaultSave(){
+  return {
+    player:{
+      map:"town",
+      x:6*TILE,y:14*TILE,dir:"down",size:22,speed:2.2,
+      party:[makeMon("mizumaru",5)],
+      dex:{mizumaru:true},
+      money:900,
+      items:{ball:5,potion:3,superpotion:1},
+      badges:0
+    },
+    flags:{
+      intro:false,
+      trainer1:false,
+      trainer2:false,
+      starterChosen:true
+    }
+  };
+}
+
+let state=loadFromStorage() || defaultSave();
+const game = {
+  mode:"title",
+  camera:{x:0,y:0},
+  encounterSteps:0,
+  dialoguePages:[],
+  dialogueIndex:0,
+  returnMode:"world",
+  menuIndex:0,
+  partyIndex:0,
+  bagIndex:0,
+  dexIndex:0,
+  shopIndex:0,
+  titleIndex:0,
+  battle:null,
+  flash:0,
+  moveCooldown:0,
+};
+
+const maps = {
+  town: buildTownMap(),
+  route1: buildRouteMap(),
+  house1: buildHouseMap("いえ"),
+  center: buildCenterMap(),
+  shop: buildShopMap()
+};
+
+function buildEmpty(cols, rows, fill){
+  return Array.from({length:rows},()=>Array.from({length:cols},()=>fill));
+}
+function buildTownMap(){
+  const cols=30, rows=20, data=buildEmpty(cols,rows,"town");
+  for(let x=0;x<cols;x++){ data[0][x]="tree"; data[rows-1][x]="tree"; }
+  for(let y=0;y<rows;y++){ data[y][0]="tree"; data[y][cols-1]="tree"; }
+  for(let y=1;y<rows-1;y++) for(let x=15;x<29;x++) data[y][x]="field";
+  for(let y=4;y<=12;y++) for(let x=18;x<=27;x++) data[y][x]="tall";
+  for(let x=5;x<=13;x++) data[15][x]="road";
+  for(let y=8;y<=12;y++){ data[y][14]="road"; data[y][15]="road"; }
+  // buildings exterior footprints
+  [[4,7,"house"],[8,7,"center"],[12,7,"shop"]].forEach(([x,y,t])=>{
+    data[y][x]=t; data[y][x+1]=t; data[y+1][x]=t; data[y+1][x+1]=t;
+  });
+  data[15][14]="gate"; data[15][15]="gate";
+  return {
+    cols,rows,data,
+    npcs:[
+      {x:6,y:11,name:"しょうねん",color:"#fde68a",talk:["ルート1には やせいが でるよ。","トレーナーも いるから ちゅうい！"]},
+      {x:10,y:11,name:"ナース",color:"#f9a8d4",talk:["センターの まえでも ヒントだけ あげるね。","中に はいれば ぜんかいふくだよ。"]},
+      {x:13,y:11,name:"てんいん",color:"#bfdbfe",talk:["ショップでは ボールや かいふくやくを かえるよ。"]},
+      {x:5,y:5,name:"おじさん",color:"#fff",talk:["Cか MENU で メニューを ひらける。","セーブも そこから できるぞ。"]},
+    ],
+    signs:[
+      {x:4,y:9,text:"プレイヤーのいえ"},
+      {x:8,y:9,text:"モンスターセンター"},
+      {x:12,y:9,text:"フレンドショップ"},
+      {x:15,y:14,text:"ルート1 →"}
+    ],
+    warps:[
+      {x:4,y:9,toMap:"house1",toX:5,toY:8,dir:"up"},
+      {x:8,y:9,toMap:"center",toX:5,toY:8,dir:"up"},
+      {x:12,y:9,toMap:"shop",toX:5,toY:8,dir:"up"},
+      {x:14,y:15,toMap:"route1",toX:2,toY:15,dir:"right"},
+      {x:15,y:15,toMap:"route1",toX:3,toY:15,dir:"right"},
+    ],
+    trainers:[]
+  };
+}
+function buildRouteMap(){
+  const cols=36, rows=22, data=buildEmpty(cols,rows,"field");
+  for(let x=0;x<cols;x++){ data[0][x]="tree"; data[rows-1][x]="tree"; }
+  for(let y=0;y<rows;y++){ data[y][0]="tree"; data[y][cols-1]="tree"; }
+  for(let x=1;x<10;x++){ data[15][x]="road"; }
+  for(let x=10;x<34;x++){ data[15][x]="field"; }
+  for(let y=3;y<=12;y++) for(let x=4;x<=10;x++) data[y][x]="tall";
+  for(let y=8;y<=18;y++) for(let x=18;x<=26;x++) data[y][x]="tall";
+  for(let x=1;x<=3;x++) data[15][x]="gate";
+  return {
+    cols,rows,data,
+    npcs:[],
+    signs:[{x:2,y:14,text:"← ハジマリ村"},{x:30,y:14,text:"さきは みかいほう"}],
+    warps:[
+      {x:1,y:15,toMap:"town",toX:14,toY:15,dir:"left"},
+      {x:2,y:15,toMap:"town",toX:15,toY:15,dir:"left"},
+      {x:3,y:15,toMap:"town",toX:16,toY:15,dir:"left"}
+    ],
+    trainers:[
+      {id:"trainer1",x:12,y:15,name:"たんぱんこぞう レン",color:"#f59e0b",monsters:[makeMon("hibany",4)],seen:["しょうぶ しようぜ！"],win:["つよいなー！"]},
+      {id:"trainer2",x:28,y:15,name:"くさむらガール ミキ",color:"#ec4899",monsters:[makeMon("happaru",5),makeMon("mizumaru",4)],seen:["ルート1の つよさを みせるよ！"],win:["まけちゃった…"]},
+    ]
+  };
+}
+function buildHouseMap(){
+  const cols=12, rows=10, data=buildEmpty(cols,rows,"floor");
+  for(let x=0;x<cols;x++){ data[0][x]="wall"; data[rows-1][x]="wall"; }
+  for(let y=0;y<rows;y++){ data[y][0]="wall"; data[y][cols-1]="wall"; }
+  data[9][5]="door"; data[9][6]="door";
+  data[2][2]="table"; data[2][3]="table"; data[2][8]="bed"; data[2][9]="bed"; data[5][4]="pc";
+  return {
+    cols,rows,data,
+    npcs:[{x:7,y:6,name:"おかあさん",color:"#fda4af",talk:["たびの じゅんびは いい？","ベッドで ねれば ぜんかいふく よ。"]}],
+    signs:[],
+    warps:[{x:5,y:9,toMap:"town",toX:4,toY:10,dir:"down"},{x:6,y:9,toMap:"town",toX:5,toY:10,dir:"down"}],
+    trainers:[]
+  };
+}
+function buildCenterMap(){
+  const cols=12, rows=10, data=buildEmpty(cols,rows,"floor");
+  for(let x=0;x<cols;x++){ data[0][x]="wall"; data[rows-1][x]="wall"; }
+  for(let y=0;y<rows;y++){ data[y][0]="wall"; data[y][cols-1]="wall"; }
+  data[9][5]="door"; data[9][6]="door"; data[3][5]="desk"; data[3][6]="desk";
+  return {
+    cols,rows,data,
+    npcs:[{x:5,y:2,name:"ジョーイ",color:"#f9a8d4",talk:["パーティを あずかります！"]}],
+    signs:[],
+    warps:[{x:5,y:9,toMap:"town",toX:8,toY:10,dir:"down"},{x:6,y:9,toMap:"town",toX:9,toY:10,dir:"down"}],
+    trainers:[]
+  };
+}
+function buildShopMap(){
+  const cols=12, rows=10, data=buildEmpty(cols,rows,"floor");
+  for(let x=0;x<cols;x++){ data[0][x]="wall"; data[rows-1][x]="wall"; }
+  for(let y=0;y<rows;y++){ data[y][0]="wall"; data[y][cols-1]="wall"; }
+  data[9][5]="door"; data[9][6]="door"; data[3][5]="desk"; data[3][6]="desk";
+  return {
+    cols,rows,data,
+    npcs:[{x:5,y:2,name:"ショップてんいん",color:"#bfdbfe",talk:["いらっしゃいませ！"]}],
+    signs:[],
+    warps:[{x:5,y:9,toMap:"town",toX:12,toY:10,dir:"down"},{x:6,y:9,toMap:"town",toX:13,toY:10,dir:"down"}],
+    trainers:[]
+  };
+}
+
+function curMap(){ return maps[state.player.map]; }
+function tileAt(mapName, tx, ty){
+  const map = maps[mapName];
+  if(!map || tx<0||ty<0||tx>=map.cols||ty>=map.rows) return "wall";
+  return map.data[ty][tx];
+}
+function tileAtPixel(px,py){ return tileAt(state.player.map, Math.floor(px/TILE), Math.floor(py/TILE)); }
+function blocked(tile){
+  return ["tree","wall","table","bed","pc","desk","house","center","shop"].includes(tile);
+}
+function saveGame(){ saveToStorage({player:state.player, flags:state.flags}); }
+
+function showDialogue(lines, returnMode="world"){
+  game.dialoguePages=lines;
+  game.dialogueIndex=0;
+  game.returnMode=returnMode;
+  game.mode="dialogue";
+}
+function warp(toMap, tx, ty, dir){
+  state.player.map=toMap;
+  state.player.x=tx*TILE;
+  state.player.y=ty*TILE;
+  state.player.dir=dir||"down";
+  saveGame();
+}
+function facingTarget(){
+  const px=Math.floor((state.player.x+state.player.size/2)/TILE);
+  const py=Math.floor((state.player.y+state.player.size/2)/TILE);
+  let dx=0,dy=0;
+  if(state.player.dir==="up") dy=-1;
+  if(state.player.dir==="down") dy=1;
+  if(state.player.dir==="left") dx=-1;
+  if(state.player.dir==="right") dx=1;
+  return {tx:px+dx, ty:py+dy};
+}
+function interact(){
+  const {tx,ty}=facingTarget();
+  const map=curMap();
+  const npc=map.npcs.find(n=>n.x===tx&&n.y===ty);
+  if(npc){
+    if(state.player.map==="center" && npc.name==="ジョーイ"){
+      fullHealParty(); saveGame(); showDialogue(["おあずかり しました！","パーティは ぜんかいふく です！"]); return;
+    }
+    if(state.player.map==="shop" && npc.name==="ショップてんいん"){
+      game.shopIndex=0; game.mode="shop"; return;
+    }
+    showDialogue(npc.talk); return;
+  }
+  const sign=map.signs.find(s=>s.x===tx&&s.y===ty);
+  if(sign){ showDialogue([sign.text]); return; }
+
+  const t=tileAt(state.player.map, tx, ty);
+  if(state.player.map==="house1" && t==="bed"){
+    fullHealParty(); saveGame(); showDialogue(["ベッドで やすんだ。","パーティは ぜんかいふく した！"]); return;
+  }
+}
+
+function trainerInSight(){
+  if(state.player.map!=="route1") return null;
+  const map=curMap();
+  const px=Math.floor((state.player.x+11)/TILE), py=Math.floor((state.player.y+11)/TILE);
+  return map.trainers.find(tr=>{
+    if(state.flags[tr.id]) return false;
+    return Math.abs(tr.x-px)+Math.abs(tr.y-py)<=3 && tr.y===py;
+  }) || null;
+}
+function movePlayer(){
+  if(game.moveCooldown>0){ game.moveCooldown--; return; }
+  let mx=0,my=0;
+  if(held("arrowup","w")){my=-1; state.player.dir="up";}
+  if(held("arrowdown","s")){my=1; state.player.dir="down";}
+  if(held("arrowleft","a")){mx=-1; state.player.dir="left";}
+  if(held("arrowright","d")){mx=1; state.player.dir="right";}
+  if(!mx && !my) return;
+  game.moveCooldown=3;
+  const nx=state.player.x + mx*4;
+  const ny=state.player.y + my*4;
+  let okx=true;
+  for(const cx of [nx,nx+state.player.size]) for(const cy of [state.player.y,state.player.y+state.player.size]) if(blocked(tileAtPixel(cx,cy))) okx=false;
+  if(okx) state.player.x=nx;
+  let oky=true;
+  for(const cx of [state.player.x,state.player.x+state.player.size]) for(const cy of [ny,ny+state.player.size]) if(blocked(tileAtPixel(cx,cy))) oky=false;
+  if(oky) state.player.y=ny;
+
+  const map=curMap();
+  const px=Math.floor((state.player.x+11)/TILE), py=Math.floor((state.player.y+11)/TILE);
+  const warpObj=map.warps.find(w=>w.x===px&&w.y===py);
+  if(warpObj){ warp(warpObj.toMap, warpObj.toX, warpObj.toY, warpObj.dir); return; }
+
+  if(state.player.map==="route1" && tileAt(state.player.map, px, py)==="tall"){
+    game.encounterSteps++;
+    if(game.encounterSteps>10 && Math.random()<0.05){
+      startWildBattle();
+      game.encounterSteps=0;
+      return;
+    }
+  }
+}
+function updateCamera(){
+  const map=curMap();
+  game.camera.x=clamp(state.player.x - W/2, 0, map.cols*TILE-W);
+  game.camera.y=clamp(state.player.y - H/2, 0, map.rows*TILE-H);
+}
+function updateWorld(){
+  if(!state.flags.intro){
+    state.flags.intro=true; saveGame();
+    showDialogue(["Monster Quest Pocket DXへ ようこそ！","村、ルート、家の中、トレーナー戦まで 遊べるよ。","まずは ルート1へ いってみよう！"]);
+    return;
+  }
+  movePlayer();
+  updateCamera();
+  if(pressed("z","enter")) interact();
+  if(pressed("c")){ game.menuIndex=0; game.mode="menu"; }
+  const tr=trainerInSight();
+  if(tr){
+    startTrainerBattle(tr);
+  }
+}
+
+function activeMon(){ return state.player.party[0]; }
+function livingParty(){ return state.player.party.filter(m=>m.hp>0); }
+function wildPick(){ return ["mizumaru","hibany","happaru"][rand(3)]; }
+function startWildBattle(){
+  game.flash=10;
+  game.battle={
+    type:"wild",
+    enemy:makeMon(wildPick(), 3+rand(4)),
+    trainer:null,
+    trainerQueue:[],
+    phase:"menu",
+    menuIndex:0,
+    moveIndex:0,
+    bagIndex:0,
+    text:"やせいの モンスターが あらわれた！"
+  };
+  game.mode="battle";
+}
+function startTrainerBattle(tr){
+  game.flash=10;
+  game.battle={
+    type:"trainer",
+    enemy:cloneMon(tr.monsters[0]),
+    trainer:tr,
+    trainerQueue:tr.monsters.slice(1).map(cloneMon),
+    phase:"intro",
+    menuIndex:0,moveIndex:0,bagIndex:0,
+    text:`${tr.name} が しょうぶを しかけてきた！`
+  };
+  game.mode="battle";
+}
+function typeMult(moveType, defenderType){ return (typeChart[moveType] && typeChart[moveType][defenderType]) || 1; }
+function applyStartTurnStatus(mon){
+  if(mon.status==="sleep"){
+    mon.statusTurns--;
+    if(mon.statusTurns<=0){ mon.status=null; return {skip:false,text:`${mname(mon)} は めを さました！`}; }
+    return {skip:true,text:`${mname(mon)} は ねむっている…`};
+  }
+  return {skip:false,text:null};
+}
+function endTurnStatus(mon){
+  if(mon.status==="poison"){
+    const dmg=Math.max(1, Math.floor(mon.maxHp*0.08));
+    mon.hp=Math.max(0, mon.hp-dmg);
+    return `${mname(mon)} は どくで ${dmg} ダメージ！`;
+  }
+  return null;
+}
+function calcDamage(attacker, defender, move){
+  const mult=typeMult(move.type, mtype(defender));
+  const stab=move.type===mtype(attacker)?1.2:1;
+  const base=move.power + attacker.level*2 + rand(4);
+  return {dmg:Math.max(1, Math.floor(base*mult*stab)), mult};
+}
+function useMove(attacker, defender, move){
+  if(move.pp<=0) return {text:"PPが たりない！", skip:false};
+  move.pp--;
+  if(move.status){
+    if(Math.random()<0.7 && !defender.status){
+      defender.status=move.status;
+      defender.statusTurns = move.status==="sleep" ? 2+rand(2) : 999;
+      return {text:`${mname(attacker)} の ${move.name}！ ${mname(defender)} は ${move.status==="sleep"?"ねむってしまった！":"どく になった！"}`, skip:false};
+    }
+    return {text:`${mname(attacker)} の ${move.name}！ しかし きかなかった…`, skip:false};
+  }
+  const {dmg,mult}=calcDamage(attacker, defender, move);
+  defender.hp=Math.max(0, defender.hp-dmg);
+  let text=`${mname(attacker)} の ${move.name}！ ${dmg} ダメージ！`;
+  if(mult>1.1) text+=" こうかは ばつぐんだ！";
+  if(mult<0.95) text+=" こうかは いまひとつ…";
+  return {text, skip:false};
+}
+function gainExp(mon, amount){
+  mon.exp += amount;
+  const logs=[];
+  while(mon.exp >= nextExp(mon)){
+    mon.exp -= nextExp(mon);
+    mon.level++;
+    mon.maxHp += 4;
+    mon.hp = Math.min(mon.maxHp, mon.hp + 8);
+    logs.push(`${mname(mon)} は Lv${mon.level} に あがった！`);
+    maybeEvolve(mon, logs);
+  }
+  return logs;
+}
+function maybeEvolve(mon, logs){
+  const s=sp(mon);
+  if(s.evolveLevel && s.evolveTo && mon.level>=s.evolveLevel){
+    const e=species[s.evolveTo];
+    const delta=(e.baseHp + mon.level*4) - mon.maxHp;
+    mon.speciesId=e.id;
+    mon.nickname=e.name;
+    mon.maxHp += delta;
+    mon.hp = Math.min(mon.maxHp, mon.hp+delta);
+    mon.moves=e.moves.map(makeMove);
+    state.player.dex[e.id]=true;
+    logs.push(`${e.name} に しんかした！`);
+  }
+}
+function catchChance(enemy){
+  const hpFactor=1 - enemy.hp/enemy.maxHp;
+  return Math.min(0.92, 0.25 + hpFactor*0.55);
+}
+function allBaseCaught(){ return ["mizumaru","hibany","happaru"].every(id=>state.player.dex[id]); }
+const shopItems = [
+  {id:"ball",name:"モンスターボール",price:200,desc:"やせいを つかまえる"},
+  {id:"potion",name:"キズぐすり",price:300,desc:"HPを20 かいふく"},
+  {id:"superpotion",name:"いいキズぐすり",price:700,desc:"HPを50 かいふく"}
+];
+
+function useBagItem(itemId, inBattle){
+  const inv=state.player.items;
+  if((inv[itemId]||0)<=0) return {text:"アイテムが ない"};
+  const mon=activeMon();
+  if(itemId==="ball"){
+    if(!inBattle || game.battle.type!=="wild") return {text:"いまは つかえない"};
+    inv[itemId]--;
+    if(Math.random()<catchChance(game.battle.enemy)){
+      const caught=cloneMon(game.battle.enemy);
+      caught.uid=Math.random().toString(36).slice(2,9);
+      if(state.player.party.length<6) state.player.party.push(caught);
+      state.player.dex[caught.speciesId]=true;
+      saveGame();
+      return {caught:true,text:`${sp(caught).name} を つかまえた！`};
+    }
+    saveGame();
+    return {text:"ボールから とびだした！"};
+  }
+  let heal=itemId==="potion"?20:itemId==="superpotion"?50:0;
+  if(heal){
+    if(mon.hp>=mon.maxHp) return {text:"HPは まんたん だ"};
+    inv[itemId]--;
+    mon.hp=Math.min(mon.maxHp, mon.hp+heal);
+    saveGame();
+    return {text:`${mname(mon)} の HPが かいふく した！`};
+  }
+  return {text:"つかえない"};
+}
+function updateBattle(){
+  const b=game.battle;
+  const me=activeMon();
+  if(game.flash>0) game.flash--;
+
+  if(b.phase==="intro"){
+    if(pressed("z","enter")){ b.phase="menu"; b.text=`${sp(b.enemy).name} が くりだされた！`; }
+    return;
+  }
+
+  if(b.phase==="menu"){
+    if(pressed("arrowup","w")) b.menuIndex=(b.menuIndex+4-1)%4;
+    if(pressed("arrowdown","s")) b.menuIndex=(b.menuIndex+1)%4;
+    if(pressed("z","enter")){
+      if(b.menuIndex===0){ b.phase="moves"; b.moveIndex=0; b.text="どの わざを つかう？"; }
+      if(b.menuIndex===1){ b.phase="bag"; b.bagIndex=0; b.text="どの アイテムを つかう？"; }
+      if(b.menuIndex===2){
+        if(b.type==="trainer"){ b.text="トレーナーせんでは にげられない！"; b.phase="afterText"; b.after="enemyTurn"; }
+        else { b.text = Math.random()<0.5 ? "うまく にげきれた！" : "にげられない！"; b.phase="afterText"; b.after = b.text.includes("うまく") ? "battleEndToWorld" : "enemyTurn"; }
+      }
+      if(b.menuIndex===3){ b.phase="party"; game.partyIndex=0; b.text="だれと いれかえる？"; }
+    }
+    return;
+  }
+
+  if(b.phase==="moves"){
+    if(pressed("arrowup","w")) b.moveIndex=(b.moveIndex+4-1)%4;
+    if(pressed("arrowdown","s")) b.moveIndex=(b.moveIndex+1)%4;
+    if(pressed("x","escape")){ b.phase="menu"; b.text="どうする？"; }
+    if(pressed("z","enter")){
+      const skip = applyStartTurnStatus(me);
+      if(skip.text){ b.text=skip.text; b.phase="afterText"; b.after = skip.skip ? "enemyTurn" : "menu"; return; }
+      const move=me.moves[b.moveIndex];
+      const r=useMove(me,b.enemy,move);
+      b.text=r.text;
+      if(b.enemy.hp<=0){ b.phase="afterText"; b.after="enemyFainted"; }
+      else { b.phase="afterText"; b.after="enemyTurn"; }
+    }
+    return;
+  }
+
+  if(b.phase==="bag"){
+    const ids=["ball","potion","superpotion"];
+    if(pressed("arrowup","w")) b.bagIndex=(b.bagIndex+ids.length-1)%ids.length;
+    if(pressed("arrowdown","s")) b.bagIndex=(b.bagIndex+1)%ids.length;
+    if(pressed("x","escape")){ b.phase="menu"; b.text="どうする？"; }
+    if(pressed("z","enter")){
+      const r=useBagItem(ids[b.bagIndex], true);
+      b.text=r.text;
+      if(r.caught){ b.phase="afterText"; b.after="battleEndToWorld"; }
+      else { b.phase="afterText"; b.after="enemyTurn"; }
+    }
+    return;
+  }
+
+  if(b.phase==="party"){
+    if(pressed("arrowup","w")) game.partyIndex=(game.partyIndex+state.player.party.length-1)%state.player.party.length;
+    if(pressed("arrowdown","s")) game.partyIndex=(game.partyIndex+1)%state.player.party.length;
+    if(pressed("x","escape")){ b.phase="menu"; b.text="どうする？"; }
+    if(pressed("z","enter")){
+      if(game.partyIndex!==0 && state.player.party[game.partyIndex].hp>0){
+        const tmp=state.player.party[0]; state.player.party[0]=state.player.party[game.partyIndex]; state.player.party[game.partyIndex]=tmp;
+        saveGame();
+        b.text=`いけ！ ${mname(activeMon())}！`;
+        b.phase="afterText"; b.after="enemyTurn";
+      }
+    }
+    return;
+  }
+
+  if(b.phase==="afterText"){
+    if(pressed("z","enter")){
+      const next=b.after;
+      if(next==="menu"){ b.phase="menu"; b.text="どうする？"; }
+      if(next==="enemyTurn"){ enemyTurn(); }
+      if(next==="enemyFainted"){ enemyFainted(); }
+      if(next==="battleEndToWorld"){ if(allBaseCaught()) game.mode="win"; else game.mode="world"; }
+      if(next==="trainerNext"){ sendNextTrainerMon(); }
+      if(next==="loseCheck"){ loseCheck(); }
+    }
+    return;
+  }
+
+  function enemyTurn(){
+    const skip = applyStartTurnStatus(b.enemy);
+    if(skip.text){
+      b.text=skip.text;
+      b.phase="afterText";
+      b.after="enemyEndStatus";
+      return;
+    }
+    const moves=b.enemy.moves.filter(m=>m.pp>0);
+    const move=(moves.length?moves[rand(moves.length)]:b.enemy.moves[0]);
+    const r=useMove(b.enemy, me, move);
+    b.text=r.text;
+    b.phase="afterText";
+    b.after="enemyEndStatus";
+  }
+
+  function enemyFainted(){
+    if(b.type==="trainer" && b.trainerQueue.length){
+      b.text=`${sp(b.enemy).name} は たおれた！`;
+      b.phase="afterText"; b.after="trainerNext";
+      return;
+    }
+    const exp=12+b.enemy.level*2, money=50+b.enemy.level*20;
+    const logs=[`${sp(b.enemy).name} は たおれた！`];
+    logs.push(...gainExp(me, exp));
+    if(b.type==="wild"){
+      state.player.money += money;
+      state.player.dex[b.enemy.speciesId]=true;
+      saveGame();
+      showDialogue([...logs, `${money}円 てにいれた！`], allBaseCaught()?"win":"world");
+    } else {
+      state.player.flags = state.flags;
+      saveGame();
+      showDialogue(logs, "battleTrainerWin");
+    }
+  }
+
+  function sendNextTrainerMon(){
+    if(!b.trainerQueue.length){
+      state.flags[b.trainer.id]=true;
+      state.player.money += 300;
+      saveGame();
+      showDialogue([`${b.trainer.name} に かった！`,`300円 てにいれた！`], "world");
+      return;
+    }
+    b.enemy = b.trainerQueue.shift();
+    b.text = `${b.trainer.name} は ${sp(b.enemy).name} を くりだした！`;
+    b.phase = "afterText";
+    b.after = "menu";
+  }
+
+  function enemyEndStatus(){
+    const txt = endTurnStatus(activeMon());
+    if(activeMon().hp<=0){
+      b.text = txt ? txt : `${mname(activeMon())} は たおれた…`;
+      b.phase="afterText"; b.after="loseCheck";
+      return;
+    }
+    if(txt){ b.text=txt; b.phase="afterText"; b.after="menu"; }
+    else { b.phase="menu"; b.text="どうする？"; }
+  }
+
+  function loseCheck(){
+    if(livingParty().length){
+      const idx=state.player.party.findIndex(m=>m.hp>0);
+      if(idx>0){
+        const tmp=state.player.party[0]; state.player.party[0]=state.player.party[idx]; state.player.party[idx]=tmp;
+      }
+      b.text=`いけ！ ${mname(activeMon())}！`;
+      b.phase="afterText"; b.after="menu";
+    } else {
+      fullHealParty();
+      warp("town",6,14,"down");
+      showDialogue(["めのまえが まっくらに なった…","ハジマリ村に もどされた！"], "world");
+    }
+  }
+}
+
+function updateMenu(){
+  const opts=["party","bag","dex","save","close"];
+  if(pressed("arrowup","w")) game.menuIndex=(game.menuIndex+opts.length-1)%opts.length;
+  if(pressed("arrowdown","s")) game.menuIndex=(game.menuIndex+1)%opts.length;
+  if(pressed("x","escape","c")){ game.mode="world"; return; }
+  if(pressed("z","enter")){
+    const c=opts[game.menuIndex];
+    if(c==="party"){ game.partyIndex=0; game.mode="party"; }
+    if(c==="bag"){ game.bagIndex=0; game.mode="bag"; }
+    if(c==="dex"){ game.dexIndex=0; game.mode="dex"; }
+    if(c==="save"){ saveGame(); showDialogue([storageAvailable?"レポートを かきこんだ！":"このビューアでは セーブできない かも。"], "menu"); }
+    if(c==="close"){ game.mode="world"; }
+  }
+}
+function updatePartyMenu(){
+  if(pressed("arrowup","w")) game.partyIndex=(game.partyIndex+state.player.party.length-1)%state.player.party.length;
+  if(pressed("arrowdown","s")) game.partyIndex=(game.partyIndex+1)%state.player.party.length;
+  if(pressed("x","escape")){ game.mode="menu"; return; }
+  if(pressed("z","enter") && game.partyIndex!==0){
+    const tmp=state.player.party[0]; state.player.party[0]=state.player.party[game.partyIndex]; state.player.party[game.partyIndex]=tmp;
+    saveGame();
+  }
+}
+function updateBagMenu(){
+  const ids=["ball","potion","superpotion"];
+  if(pressed("arrowup","w")) game.bagIndex=(game.bagIndex+ids.length-1)%ids.length;
+  if(pressed("arrowdown","s")) game.bagIndex=(game.bagIndex+1)%ids.length;
+  if(pressed("x","escape")){ game.mode="menu"; return; }
+  if(pressed("z","enter")){
+    const r=useBagItem(ids[game.bagIndex], false);
+    showDialogue([r.text], "bag");
+  }
+}
+function updateDexMenu(){
+  const ids=Object.keys(species);
+  if(pressed("arrowup","w")) game.dexIndex=(game.dexIndex+ids.length-1)%ids.length;
+  if(pressed("arrowdown","s")) game.dexIndex=(game.dexIndex+1)%ids.length;
+  if(pressed("x","escape")) game.mode="menu";
+}
+function updateShop(){
+  if(pressed("arrowup","w")) game.shopIndex=(game.shopIndex+shopItems.length-1)%shopItems.length;
+  if(pressed("arrowdown","s")) game.shopIndex=(game.shopIndex+1)%shopItems.length;
+  if(pressed("x","escape")){ game.mode="world"; return; }
+  if(pressed("z","enter")){
+    const it=shopItems[game.shopIndex];
+    if(state.player.money>=it.price){
+      state.player.money -= it.price;
+      state.player.items[it.id]=(state.player.items[it.id]||0)+1;
+      saveGame();
+      showDialogue([`${it.name} を かった！`], "shop");
+    } else {
+      showDialogue(["おかねが たりない…"], "shop");
+    }
+  }
+}
+function updateTitle(){
+  if(pressed("arrowup","w","arrowdown","s")) game.titleIndex = 1-game.titleIndex;
+  if(pressed("z","enter")){
+    if(game.titleIndex===0){ game.mode="world"; }
+    else { state=defaultSave(); saveGame(); game.mode="world"; }
+  }
+}
+
+function drawTile(tile, sx, sy){
+  if(tile==="tree"){
+    ctx.fillStyle="#14532d"; ctx.fillRect(sx,sy,TILE,TILE);
+    ctx.fillStyle="#166534"; ctx.fillRect(sx+4,sy+2,TILE-8,TILE-8);
+    ctx.fillStyle="#5b3a1e"; ctx.fillRect(sx+12,sy+18,8,10);
+  } else if(tile==="town"){ ctx.fillStyle="#d8c8a6"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="field"){ ctx.fillStyle="#7ab42e"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="tall"){
+    ctx.fillStyle="#7ab42e"; ctx.fillRect(sx,sy,TILE,TILE);
+    ctx.fillStyle="#3f7d20"; for(let i=0;i<5;i++) ctx.fillRect(sx+4+i*5, sy+10+(i%2)*4, 3, 12);
+  } else if(tile==="road" || tile==="gate"){ ctx.fillStyle="#b08968"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="house"){
+    ctx.fillStyle="#f3f4f6"; ctx.fillRect(sx,sy,TILE,TILE); ctx.fillStyle="#b91c1c"; ctx.fillRect(sx,sy,TILE,10); ctx.fillStyle="#92400e"; ctx.fillRect(sx+10,sy+18,12,14);
+  } else if(tile==="center"){
+    ctx.fillStyle="#fee2e2"; ctx.fillRect(sx,sy,TILE,TILE); ctx.fillStyle="#ef4444"; ctx.fillRect(sx,sy,TILE,10); ctx.fillStyle="#fff"; ctx.fillRect(sx+10,sy+18,12,12);
+  } else if(tile==="shop"){
+    ctx.fillStyle="#e0f2fe"; ctx.fillRect(sx,sy,TILE,TILE); ctx.fillStyle="#0ea5e9"; ctx.fillRect(sx,sy,TILE,10); ctx.fillStyle="#fff"; ctx.fillRect(sx+10,sy+18,12,12);
+  } else if(tile==="floor"){ ctx.fillStyle="#ddd6c7"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="wall"){ ctx.fillStyle="#6b7280"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="table"){ ctx.fillStyle="#9a6b39"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="bed"){ ctx.fillStyle="#f9a8d4"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="pc"){ ctx.fillStyle="#60a5fa"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="desk"){ ctx.fillStyle="#c084fc"; ctx.fillRect(sx,sy,TILE,TILE);
+  } else if(tile==="door"){ ctx.fillStyle="#a16207"; ctx.fillRect(sx,sy,TILE,TILE);
+  }
+  ctx.strokeStyle="rgba(0,0,0,.08)";
+  ctx.strokeRect(sx,sy,TILE,TILE);
+}
+function uiBox(x,y,w,h){
+  ctx.fillStyle="rgba(245,239,226,.98)";
+  ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle="#222"; ctx.lineWidth=4; ctx.strokeRect(x,y,w,h);
+}
+function wrapText(text,x,y,maxWidth,lineHeight){
+  const chars=[...text]; let line="", yy=y;
+  for(const ch of chars){
+    const t=line+ch;
+    if(ctx.measureText(t).width > maxWidth && line){ ctx.fillText(line,x,yy); line=ch; yy+=lineHeight; }
+    else line=t;
+  }
+  if(line) ctx.fillText(line,x,yy);
+}
+function drawWorld(){
+  const map=curMap();
+  for(let y=0;y<map.rows;y++) for(let x=0;x<map.cols;x++){
+    const sx=x*TILE-game.camera.x, sy=y*TILE-game.camera.y;
+    if(sx+TILE<0||sy+TILE<0||sx>W||sy>H) continue;
+    drawTile(map.data[y][x], sx, sy);
+  }
+  map.signs.forEach(s=>{
+    const sx=s.x*TILE-game.camera.x, sy=s.y*TILE-game.camera.y;
+    ctx.fillStyle="#fef3c7"; ctx.fillRect(sx+8,sy+8,16,16); ctx.fillStyle="#92400e"; ctx.fillRect(sx+14,sy+12,4,8);
+  });
+  map.npcs.forEach(n=>{
+    const sx=n.x*TILE-game.camera.x, sy=n.y*TILE-game.camera.y;
+    ctx.fillStyle=n.color; ctx.beginPath(); ctx.arc(sx+16,sy+16,10,0,Math.PI*2); ctx.fill();
+  });
+  map.trainers.forEach(n=>{
+    if(state.flags[n.id]) return;
+    const sx=n.x*TILE-game.camera.x, sy=n.y*TILE-game.camera.y;
+    ctx.fillStyle=n.color; ctx.beginPath(); ctx.arc(sx+16,sy+16,10,0,Math.PI*2); ctx.fill();
+  });
+
+  const sx=state.player.x-game.camera.x, sy=state.player.y-game.camera.y;
+  ctx.fillStyle="#2563eb"; ctx.beginPath(); ctx.arc(sx+11,sy+11,11,0,Math.PI*2); ctx.fill();
+}
+function drawWorldUI(){
+  const mon=activeMon();
+  uiBox(16,16,290,112);
+  ctx.fillStyle="#111"; ctx.font="20px sans-serif";
+  ctx.fillText(`${mname(mon)} Lv${mon.level}`, 30, 44);
+  ctx.fillText(`HP ${mon.hp}/${mon.maxHp}`, 30, 72);
+  ctx.fillText(`状態 ${mon.status ? (mon.status==="sleep"?"ねむり":"どく") : "なし"}`, 30, 100);
+
+  uiBox(W-238,16,222,112);
+  ctx.fillText(`所持金 ${state.player.money}円`, W-220, 44);
+  ctx.fillText(`図鑑 ${Object.keys(state.player.dex).length}/${Object.keys(species).length}`, W-220, 72);
+  ctx.fillText(`セーブ ${storageAvailable ? "OK" : "制限あり"}`, W-220, 100);
+}
+function drawDialogue(){
+  drawWorld(); drawWorldUI();
+  uiBox(36,H-184,W-72,140);
+  ctx.fillStyle="#111"; ctx.font="26px sans-serif";
+  wrapText(game.dialoguePages[game.dialogueIndex]||"", 64, H-126, W-128, 34);
+  ctx.font="18px sans-serif";
+  ctx.fillText(`${game.dialogueIndex+1}/${game.dialoguePages.length}`, 64, H-70);
+  ctx.fillText("Aで次へ / Bで閉じる", W-240, H-70);
+}
+function drawTitle(){
+  ctx.fillStyle="#0b1020"; ctx.fillRect(0,0,W,H);
+  for(let i=0;i<120;i++){
+    ctx.fillStyle=`rgba(255,255,255,${0.1 + (i%5)*0.04})`;
+    ctx.fillRect((i*73)%W, (i*37)%H, 2, 2);
+  }
+  ctx.fillStyle="#fff"; ctx.font="56px sans-serif";
+  ctx.fillText("MONSTER QUEST", 188, 180);
+  ctx.fillStyle="#7dd3fc"; ctx.font="48px sans-serif";
+  ctx.fillText("Pocket DX Complete", 220, 242);
+  uiBox(300,340,360,150);
+  const opts=["つづきから","はじめから"];
+  ctx.font="30px sans-serif";
+  opts.forEach((o,i)=>{
+    ctx.fillStyle=i===game.titleIndex?"#2563eb":"#111";
+    ctx.fillText((i===game.titleIndex?"▶ ":"   ")+o, 354, 396+i*52);
+  });
+}
+function drawMenu(){
+  drawWorld(); drawWorldUI();
+  uiBox(W-280,100,230,260);
+  const opts=["パーティ","バッグ","ずかん","セーブ","とじる"];
+  ctx.font="28px sans-serif";
+  opts.forEach((o,i)=>{
+    ctx.fillStyle=i===game.menuIndex?"#2563eb":"#111";
+    ctx.fillText((i===game.menuIndex?"▶ ":"   ")+o, W-252, 150+i*42);
+  });
+}
+function drawParty(){
+  drawWorld(); drawWorldUI();
+  uiBox(110,66,740,510);
+  ctx.fillStyle="#111"; ctx.font="30px sans-serif"; ctx.fillText("パーティ", 146, 108);
+  state.player.party.forEach((m,i)=>{
+    const y=164+i*58;
+    uiBox(138,y-32,680,42);
+    ctx.fillStyle=i===game.partyIndex?"#2563eb":"#111";
+    ctx.font="22px sans-serif";
+    ctx.fillText((i===game.partyIndex?"▶ ":"   ")+`${mname(m)} Lv${m.level} HP ${m.hp}/${m.maxHp} ${m.status? (m.status==="sleep"?"ねむり":"どく"):""}`, 150, y);
+  });
+}
+function drawBag(){
+  drawWorld(); drawWorldUI();
+  uiBox(150,96,660,430);
+  const rows=[["ball","モンスターボール"],["potion","キズぐすり"],["superpotion","いいキズぐすり"]];
+  ctx.fillStyle="#111"; ctx.font="30px sans-serif"; ctx.fillText("バッグ", 184, 138);
+  rows.forEach((r,i)=>{
+    ctx.fillStyle=i===game.bagIndex?"#2563eb":"#111";
+    ctx.font="26px sans-serif";
+    ctx.fillText((i===game.bagIndex?"▶ ":"   ")+`${r[1]} x${state.player.items[r[0]]||0}`, 190, 210+i*72);
+  });
+}
+function drawDex(){
+  drawWorld(); drawWorldUI();
+  const ids=Object.keys(species);
+  uiBox(90,60,780,520);
+  ctx.fillStyle="#111"; ctx.font="30px sans-serif"; ctx.fillText("ずかん", 126, 102);
+  ids.forEach((id,i)=>{
+    const s=species[id], seen=!!state.player.dex[id], y=150+i*48;
+    ctx.fillStyle=i===game.dexIndex?"#2563eb":"#111";
+    ctx.font="22px sans-serif";
+    ctx.fillText((i===game.dexIndex?"▶ ":"   ")+(seen?`${s.name} / ${s.type}`:"？？？？"), 126, y);
+  });
+  const cur=species[ids[game.dexIndex]];
+  if(state.player.dex[cur.id]){
+    ctx.fillStyle=cur.color; ctx.beginPath(); ctx.arc(680,220,56,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#111"; ctx.font="24px sans-serif";
+    ctx.fillText(cur.name, 630, 320);
+    ctx.fillText(`タイプ: ${cur.type}`, 604, 356);
+    ctx.fillText(`進化: ${cur.evolveTo?"あり":"なし"}`, 604, 392);
+  }
+}
+function drawShop(){
+  drawWorld(); drawWorldUI();
+  uiBox(146,88,670,460);
+  ctx.fillStyle="#111"; ctx.font="30px sans-serif"; ctx.fillText("フレンドショップ", 182, 130);
+  shopItems.forEach((it,i)=>{
+    const y=205+i*100;
+    ctx.fillStyle=i===game.shopIndex?"#2563eb":"#111";
+    ctx.font="24px sans-serif";
+    ctx.fillText((i===game.shopIndex?"▶ ":"   ")+`${it.name} ${it.price}円`, 180, y);
+    ctx.font="18px sans-serif";
+    ctx.fillText(it.desc, 220, y+28);
+  });
+}
+function drawBattle(){
+  const b=game.battle, me=activeMon(), enemy=b.enemy;
+  ctx.fillStyle="#8ecae6"; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#90be6d"; ctx.beginPath(); ctx.ellipse(220,430,150,50,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(720,220,140,44,0,0,Math.PI*2); ctx.fill();
+
+  ctx.fillStyle=mcolor(enemy); ctx.beginPath(); ctx.arc(720,168,52,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=mcolor(me); ctx.beginPath(); ctx.arc(220,360,64,0,Math.PI*2); ctx.fill();
+
+  uiBox(630,80,270,84); uiBox(70,456,320,100);
+  ctx.fillStyle="#111"; ctx.font="24px sans-serif";
+  ctx.fillText(`${mname(enemy)} Lv${enemy.level}`, 648, 112);
+  ctx.fillText(`HP ${enemy.hp}/${enemy.maxHp}`, 648, 142);
+  ctx.fillText(`${mname(me)} Lv${me.level}`, 88, 490);
+  ctx.fillText(`HP ${me.hp}/${me.maxHp}`, 88, 520);
+  ctx.fillText(`状態 ${me.status? (me.status==="sleep"?"ねむり":"どく"):"なし"}`, 88, 548);
+
+  uiBox(24,H-190,W-48,166);
+  ctx.fillStyle="#111"; ctx.font="28px sans-serif";
+  wrapText(b.text, 50, H-132, W-380, 36);
+
+  if(b.phase==="menu"){
+    uiBox(W-300,H-182,242,144);
+    ["たたかう","バッグ","にげる","いれかえ"].forEach((t,i)=>{
+      ctx.fillStyle=i===b.menuIndex?"#2563eb":"#111";
+      ctx.fillText((i===b.menuIndex?"▶ ":"   ")+t, W-270, H-140+i*32+8);
+    });
+  }
+  if(b.phase==="moves"){
+    uiBox(W-390,H-210,330,172);
+    me.moves.forEach((m,i)=>{
+      ctx.fillStyle=i===b.moveIndex?"#2563eb":"#111";
+      ctx.font="20px sans-serif";
+      ctx.fillText((i===b.moveIndex?"▶ ":"   ")+`${m.name} ${m.pp}/${m.maxPP}`, W-364, H-170+i*36);
+    });
+  }
+  if(b.phase==="bag"){
+    uiBox(W-360,H-196,300,160);
+    ["ball","potion","superpotion"].forEach((id,i)=>{
+      const label=id==="ball"?"ボール":id==="potion"?"キズぐすり":"いいキズぐすり";
+      ctx.fillStyle=i===b.bagIndex?"#2563eb":"#111";
+      ctx.font="22px sans-serif";
+      ctx.fillText((i===b.bagIndex?"▶ ":"   ")+`${label} x${state.player.items[id]||0}`, W-334, H-156+i*34);
+    });
+  }
+  if(b.phase==="party"){
+    uiBox(W-400,H-230,340,194);
+    state.player.party.forEach((m,i)=>{
+      ctx.fillStyle=i===game.partyIndex?"#2563eb":"#111";
+      ctx.font="18px sans-serif";
+      ctx.fillText((i===game.partyIndex?"▶ ":"   ")+`${mname(m)} Lv${m.level} HP${m.hp}/${m.maxHp}`, W-374, H-190+i*28);
+    });
+  }
+  if(game.flash>0){
+    ctx.fillStyle=`rgba(255,255,255,${game.flash/10})`;
+    ctx.fillRect(0,0,W,H);
+  }
+}
+function drawWin(){
+  ctx.fillStyle="#101827"; ctx.fillRect(0,0,W,H);
+  uiBox(110,90,W-220,H-180);
+  ctx.fillStyle="#111"; ctx.font="44px sans-serif";
+  ctx.fillText("ずかんコンプリート！", 268, 170);
+  ctx.font="28px sans-serif"; ctx.fillText("3系統のモンスターを ぜんぶ あつめた！", 220, 230);
+  ["mizumaru","hibany","happaru"].forEach((id,i)=>{
+    const s=species[id], y=320+i*78;
+    ctx.fillStyle=s.color; ctx.beginPath(); ctx.arc(260,y-12,22,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#111"; ctx.fillText(`${s.name} / ${s.type}`, 308, y);
+  });
+  ctx.font="24px sans-serif"; ctx.fillText("Aで タイトルへ", 394, 530);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  if(game.mode==="title") drawTitle();
+  else if(game.mode==="world") { drawWorld(); drawWorldUI(); }
+  else if(game.mode==="dialogue") drawDialogue();
+  else if(game.mode==="menu") drawMenu();
+  else if(game.mode==="party") drawParty();
+  else if(game.mode==="bag") drawBag();
+  else if(game.mode==="dex") drawDex();
+  else if(game.mode==="shop") drawShop();
+  else if(game.mode==="battle") drawBattle();
+  else if(game.mode==="win") drawWin();
+  else if(game.mode==="battleTrainerWin"){ game.mode="world"; }
+}
+
+function update(){
+  if(game.mode==="title") updateTitle();
+  else if(game.mode==="world") updateWorld();
+  else if(game.mode==="dialogue"){
+    if(pressed("z","enter")){
+      game.dialogueIndex++;
+      if(game.dialogueIndex>=game.dialoguePages.length){
+        if(game.returnMode==="win") game.mode="win";
+        else if(game.returnMode==="battleTrainerWin") game.mode="world";
+        else game.mode=game.returnMode;
+      }
+    }
+    if(pressed("x","escape")) game.mode=game.returnMode;
+  }
+  else if(game.mode==="menu") updateMenu();
+  else if(game.mode==="party") updatePartyMenu();
+  else if(game.mode==="bag") updateBagMenu();
+  else if(game.mode==="dex") updateDexMenu();
+  else if(game.mode==="shop") updateShop();
+  else if(game.mode==="battle") updateBattle();
+  else if(game.mode==="win"){
+    if(pressed("z","enter","x")) game.mode="title";
+  }
+}
+function loop(){
+  update();
+  draw();
+  justPressed.clear();
+  requestAnimationFrame(loop);
+}
+loop();
+})();
+</script>
+</body>
+</html>
