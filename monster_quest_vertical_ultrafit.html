@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>Monster Quest Vertical Ultra Fit</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#08101b;color:#fff;font-family:system-ui,-apple-system,sans-serif}
+  body{display:flex;justify-content:center}
+  .app{
+    width:100%;max-width:430px;height:100dvh;
+    display:grid;
+    grid-template-rows:38px 34px minmax(0,1fr) 132px;
+    gap:4px;
+    padding:4px 4px calc(4px + env(safe-area-inset-bottom));
+    background:radial-gradient(circle at top,#17315b 0%,#0b1527 55%,#08101b 100%);
+  }
+  .bar,.sub{
+    background:rgba(10,18,32,.82);
+    border:1px solid rgba(148,163,184,.14);
+    border-radius:12px;
+    display:flex;align-items:center;
+    padding:0 10px;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+  .bar{font-size:14px;font-weight:900}
+  .sub{font-size:10px;color:#dbe4ff}
+  .panel{
+    background:rgba(10,18,32,.78);
+    border:1px solid rgba(148,163,184,.14);
+    border-radius:14px;
+    padding:4px;
+    overflow:hidden;
+    min-height:0;
+  }
+  canvas{
+    width:100%;
+    height:100%;
+    display:block;
+    border-radius:10px;
+    border:2px solid #243250;
+    background:#000;
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+  }
+  .controls{
+    display:grid;
+    grid-template-columns:132px 58px 132px;
+    justify-content:space-between;
+    align-items:end;
+    gap:4px;
+    min-height:0;
+  }
+  .dpad{
+    display:grid;
+    grid-template-columns:42px 42px 42px;
+    grid-template-rows:42px 42px 42px;
+    gap:3px;
+    justify-content:start;
+    align-content:end;
+  }
+  .mid{
+    display:grid;
+    grid-template-rows:1fr 1fr;
+    gap:4px;
+    align-content:end;
+  }
+  .ab{
+    display:grid;
+    grid-template-columns:64px 64px;
+    grid-template-rows:42px 42px;
+    gap:4px;
+    justify-content:end;
+    align-content:end;
+  }
+  .touch{
+    border:none;border-radius:14px;
+    color:#fff;font-weight:900;
+    background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 6px 14px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.16);
+    font-size:16px;
+    min-width:42px;min-height:42px;
+  }
+  .touch.wide{min-width:64px}
+  .touch.slim{min-height:42px;font-size:12px}
+  .ghost{visibility:hidden}
+  .touch:active,.touch.active{transform:scale(.98);background:rgba(255,255,255,.22)}
+  @media (max-height: 760px){
+    .app{grid-template-rows:34px 30px minmax(0,1fr) 122px}
+    .controls{grid-template-columns:120px 54px 120px}
+    .dpad{grid-template-columns:38px 38px 38px;grid-template-rows:38px 38px 38px}
+    .ab{grid-template-columns:58px 58px;grid-template-rows:38px 38px}
+    .touch{min-width:38px;min-height:38px;font-size:14px;border-radius:12px}
+    .touch.wide{min-width:58px}
+    .touch.slim{min-height:38px;font-size:11px}
+  }
+  @media (min-width: 760px){
+    .app{max-width:980px;grid-template-columns:1fr 280px;grid-template-rows:38px 34px minmax(0,1fr);grid-template-areas:"bar bar" "sub sub" "game ctrl"}
+    .bar{grid-area:bar}.sub{grid-area:sub}.panel{grid-area:game}
+    .controls{grid-area:ctrl;grid-template-columns:1fr;grid-template-rows:auto auto auto;justify-items:center;gap:8px;height:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">Monster Quest Vertical Ultra Fit</div>
+  <div class="sub">縦画面で全部収まる最小配置版</div>
+  <div class="panel"><canvas id="game" width="480" height="720"></canvas></div>
+
+  <div class="controls">
+    <div class="dpad">
+      <button class="touch ghost"></button>
+      <button class="touch" data-key="up">▲</button>
+      <button class="touch ghost"></button>
+      <button class="touch" data-key="left">◀</button>
+      <button class="touch ghost"></button>
+      <button class="touch" data-key="right">▶</button>
+      <button class="touch ghost"></button>
+      <button class="touch" data-key="down">▼</button>
+      <button class="touch ghost"></button>
+    </div>
+    <div class="mid">
+      <button class="touch slim" data-key="menu">MENU</button>
+      <button class="touch slim" data-key="back">B</button>
+    </div>
+    <div class="ab">
+      <button class="touch wide ghost"></button>
+      <button class="touch wide" data-key="a">A</button>
+      <button class="touch wide ghost"></button>
+      <button class="touch wide" data-key="b">B</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const TYPES=["fire","water","electric","grass","psychic","flying","ground","rock","ice","normal"];
+const TYPE_JP={fire:"ほのお",water:"みず",electric:"でんき",grass:"くさ",psychic:"エスパー",flying:"ひこう",ground:"じめん",rock:"いわ",ice:"こおり",normal:"ノーマル"};
+const TYPE_COLORS={fire:"#ef4444",water:"#3b82f6",electric:"#f59e0b",grass:"#16a34a",psychic:"#8b5cf6",flying:"#0ea5e9",ground:"#a16207",rock:"#78716c",ice:"#06b6d4",normal:"#64748b"};
+const TYPE_CHART={fire:{grass:1.5,ice:1.5,water:0.5,rock:0.5},water:{fire:1.5,rock:1.5,ground:1.5,grass:0.5,electric:0.5},electric:{water:1.5,flying:1.5,ground:0.5,grass:0.5},grass:{water:1.5,ground:1.5,rock:1.5,fire:0.5,flying:0.5,ice:0.5},psychic:{psychic:0.5},flying:{grass:1.5,electric:0.5,rock:0.5,ice:0.5},ground:{electric:1.5,fire:1.5,rock:1.5,grass:0.5,flying:0.5},rock:{flying:1.5,ice:1.5,fire:1.5,ground:0.5},ice:{grass:1.5,flying:1.5,ground:1.5,fire:0.5,rock:0.5,water:0.5},normal:{}};
+
+function rand(n){ return Math.floor(Math.random()*n); }
+function pick(a){ return a[rand(a.length)]; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function save(){ try{ localStorage.setItem("monster_vertical_ultrafit", JSON.stringify(state)); }catch(e){} }
+function load(){ try{ const raw=localStorage.getItem("monster_vertical_ultrafit"); return raw?JSON.parse(raw):null; }catch(e){ return null; } }
+function typeMult(a,b){ return TYPE_CHART[a]?.[b] || 1; }
+
+function genMoves(){
+ const parts={fire:["フレア","ヒート","マグマ","ブレイズ"],water:["アクア","ウェーブ","タイド","マリン"],electric:["ボルト","サンダー","スパーク","プラズマ"],grass:["リーフ","ソーン","ブルーム","ヴァイン"],psychic:["サイコ","ドリーム","ミラー","マインド"],flying:["エア","ガスト","スカイ","フェザー"],ground:["アース","サンド","テラ","クエイク"],rock:["ロック","ストーン","クリフ","クラッシュ"],ice:["アイス","フロスト","スノー","ブリザ"],normal:["ラッシュ","タックル","キック","パンチ"]};
+ const suffix=["ショット","バースト","スラッシュ","ノヴァ","ランス","クロス"];
+ const out=[]; let id=1;
+ for(const t of TYPES){
+   for(let i=0;i<10;i++) out.push({id:"mv"+id++,name:parts[t][i%4]+suffix[i%6],type:t,cat:"attack",power:28+i*4,accuracy:94,pp:18});
+   out.push({id:"mv"+id++,name:parts[t][0]+"ヒール",type:t,cat:"status",effect:"heal",pp:10,accuracy:100});
+   out.push({id:"mv"+id++,name:parts[t][1]+"ミスト",type:t,cat:"status",effect:"sleep",pp:8,accuracy:90});
+ }
+ return out.slice(0,150);
+}
+const MOVES=genMoves();
+const MOVE_BY_ID=Object.fromEntries(MOVES.map(m=>[m.id,m]));
+
+function genSpecies(){
+ const A=["ア","イ","ウ","エ","オ","カ","キ","ク","ケ","コ","サ","シ","ス","セ","ソ","タ","チ","ツ","テ","ト","ナ","ニ","ヌ","ネ","ノ","ハ","ヒ","フ","ヘ","ホ","マ","ミ","ム","メ","モ","ラ","リ","ル","レ","ロ","ヤ","ユ","ヨ"];
+ const B=["ラン","ミア","ズン","リオ","ノル","フェ","ガ","ドラ","ピコ","ティ","バ","シア","ロン","ネア","ギル","ラ","トス","ニア","ポ","クス"];
+ const out=[]; let no=1;
+ for(let fam=0; fam<50; fam++){
+   const t1=TYPES[fam%9], t2=TYPES[(fam*3+2)%9];
+   const root=(A[fam%A.length]||"ア")+(B[fam%B.length]||"ラ");
+   const names=[root+"ン",root+"ード",root+"ザウル"];
+   const pool=MOVES.filter(m=>m.type===t1 || m.type===t2 || m.type==="normal");
+   const learnset=[1,4,8,12,16,20,26,32].map((lv,i)=>({level:lv,moveId:pool[(fam*5+i*2)%pool.length].id}));
+   for(let stage=0; stage<3; stage++){
+     out.push({id:"mon_"+no,name:names[stage],type1:t1,type2:(stage===2&&fam%4===0)?t2:null,base:{hp:34+(fam%8)*2+stage*14,atk:18+(fam*2)%10+stage*10,def:17+(fam*3)%10+stage*9,spd:16+(fam*5)%10+stage*8},evolveTo:stage<2?("mon_"+(no+1)):null,evolveLevel:stage===0?16:(stage===1?36:null),learnset:[...learnset]});
+     no++;
+   }
+ }
+ out.push({id:"mon_151",name:"レグナディア",type1:"psychic",type2:"ice",base:{hp:88,atk:80,def:76,spd:84},evolveTo:null,evolveLevel:null,learnset:[{level:1,moveId:MOVES[0].id},{level:1,moveId:MOVES[1].id},{level:20,moveId:MOVES[10].id},{level:40,moveId:MOVES[20].id}]});
+ return out;
+}
+const SPECIES=genSpecies();
+const SPECIES_BY_ID=Object.fromEntries(SPECIES.map(s=>[s.id,s]));
+const TOWNS=[{name:"はじまりタウン",boss:"ミナト",type:"grass",level:10},{name:"スパークシティ",boss:"ライガ",type:"electric",level:16},{name:"マリーナポート",boss:"シオン",type:"water",level:22},{name:"グラニットヒル",boss:"ガンテツ",type:"rock",level:28},{name:"スカイメサ",boss:"ツバサ",type:"flying",level:34},{name:"ミラーフォレスト",boss:"ユメ",type:"psychic",level:40},{name:"フロストベイル",boss:"ユキナ",type:"ice",level:46},{name:"ボルケニア",boss:"エンジ",type:"fire",level:52},{name:"シャドウゲート",boss:"レグナ",type:"psychic",level:60}];
+
+function calcStats(spec,level){ return {hp:Math.floor(spec.base.hp+level*3.2), atk:Math.floor(spec.base.atk+level*2.1), def:Math.floor(spec.base.def+level*1.9), spd:Math.floor(spec.base.spd+level*2)}; }
+function knownMoves(spec,level){ return spec.learnset.filter(x=>x.level<=level).slice(-4).map(x=>({id:x.moveId, pp:MOVE_BY_ID[x.moveId].pp})); }
+function createMon(speciesId,level){ const sp=SPECIES_BY_ID[speciesId], stats=calcStats(sp,level); return {instanceId:uid(), speciesId, nickname:sp.name, level, exp:0, currentHp:stats.hp, stats, moves:knownMoves(sp,level), status:null, statusTurns:0}; }
+function restoreMon(mon){ const sp=SPECIES_BY_ID[mon.speciesId]; if(!mon.stats) mon.stats=calcStats(sp,mon.level); if(mon.currentHp==null) mon.currentHp=mon.stats.hp; if(!mon.moves||!mon.moves.length) mon.moves=knownMoves(sp,mon.level); mon.moves=mon.moves.map(m=>({id:m.id, pp:m.pp ?? MOVE_BY_ID[m.id].pp})); return mon; }
+function expNeed(level){ return 20+level*8; }
+function learnLatest(mon){ const sp=SPECIES_BY_ID[mon.speciesId]; mon.moves=sp.learnset.filter(x=>x.level<=mon.level).slice(-4).map(x=>({id:x.moveId, pp:MOVE_BY_ID[x.moveId].pp})); }
+function maybeEvolve(mon){ const sp=SPECIES_BY_ID[mon.speciesId]; if(sp.evolveTo && mon.level>=sp.evolveLevel){ mon.speciesId=sp.evolveTo; const nx=SPECIES_BY_ID[mon.speciesId]; mon.nickname=nx.name; mon.stats=calcStats(nx,mon.level); mon.currentHp=mon.stats.hp; learnLatest(mon);} }
+function gainExp(mon,exp){ mon.exp+=exp; while(mon.exp>=expNeed(mon.level)){ mon.exp-=expNeed(mon.level); mon.level++; mon.stats=calcStats(SPECIES_BY_ID[mon.speciesId],mon.level); mon.currentHp=mon.stats.hp; learnLatest(mon); maybeEvolve(mon);} }
+
+function defaultState(){ return {scene:"title", player:{name:"主人公", gender:"boy", money:800, balls:10, potions:6, badges:0, town:0, roster:[]}, routeProgress:Array.from({length:8},()=>({trainersDefeated:0})), selectedStarter:"mon_1", battle:null}; }
+let state=load()||defaultState();
+state.player.roster=(state.player.roster||[]).map(restoreMon).slice(0,99);
+
+const input={up:false,down:false,left:false,right:false,a:false,b:false,menu:false,back:false};
+document.querySelectorAll('[data-key]').forEach(btn=>{
+ const key=btn.dataset.key;
+ const on=e=>{ e.preventDefault(); input[key]=true; btn.classList.add('active'); };
+ const off=e=>{ e.preventDefault(); input[key]=false; btn.classList.remove('active'); };
+ btn.addEventListener('pointerdown', on);
+ btn.addEventListener('pointerup', off);
+ btn.addEventListener('pointercancel', off);
+ btn.addEventListener('pointerleave', off);
+});
+
+function activeMon(){ return state.player.roster[0]; }
+
+function rr(x,y,w,h,r=12,fill="#f7f2e7",stroke="#243250"){
+ ctx.fillStyle=fill; ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.fill();
+ ctx.strokeStyle=stroke; ctx.lineWidth=3; ctx.stroke();
+}
+function txt(t,x,y,c="#111827",s=16,w="900",a="left"){ ctx.fillStyle=c; ctx.font=`${w} ${s}px system-ui`; ctx.textAlign=a; ctx.fillText(t,x,y); }
+function clear(){ ctx.fillStyle="#0b1527"; ctx.fillRect(0,0,canvas.width,canvas.height); }
+function hpbar(x,y,w,h,p){ rr(x,y,w,h,h/2,"#e5e7eb","#cbd5e1"); ctx.fillStyle="#22c55e"; roundBar(x,y,w*clamp(p,0,1),h); }
+function roundBar(x,y,w,h){ ctx.beginPath(); ctx.moveTo(x+h/2,y); ctx.arcTo(x+w,y,x+w,y+h,h/2); ctx.arcTo(x+w,y+h,x,y+h,h/2); ctx.arcTo(x,y+h,x,y,h/2); ctx.arcTo(x,y,x+w,y,h/2); ctx.fill(); }
+function tag(type,x,y){ rr(x,y,70,22,11,TYPE_COLORS[type]||"#64748b",TYPE_COLORS[type]||"#64748b"); txt(TYPE_JP[type],x+35,y+15,"#fff",11,"900","center"); }
+
+function drawTitle(){
+ clear();
+ rr(14,14,452,108);
+ txt("Monster Quest",30,52,"#111827",28);
+ txt("縦画面ウルトラ圧縮版",30,84,"#475569",16,"800");
+
+ rr(14,132,452,170);
+ txt("主人公",30,164);
+ txt("Bで性別切替 / 左右でスターター変更",30,194,"#475569",14,"800");
+ const g = state.player.gender==="boy" ? "男の子" : "女の子";
+ txt(g,30,228,"#2563eb",22);
+ txt("スターター",30,260);
+ const starters=["mon_1","mon_4","mon_7"];
+ starters.forEach((id,i)=>{
+   const s=SPECIES_BY_ID[id], x=34+i*132;
+   ctx.fillStyle=TYPE_COLORS[s.type1]; ctx.beginPath(); ctx.arc(x+24,286,22,0,Math.PI*2); ctx.fill();
+   txt(s.name.slice(0,2),x+24,292,"#fff",13,"900","center");
+   if(state.selectedStarter===id){ ctx.strokeStyle="#f59e0b"; ctx.lineWidth=4; ctx.strokeRect(x-6,260,60,52); }
+ });
+
+ rr(14,316,452,390);
+ txt("Aでゲーム開始",30,350,"#16a34a",24);
+ txt("縦画面用に全ボタン固定済み",30,384,"#475569",16,"800");
+ txt("この版は『ちゃんと全部収まるか』確認用",30,416,"#475569",16,"800");
+}
+
+function drawHub(){
+ clear();
+ const town=TOWNS[state.player.town], mon=activeMon();
+ rr(14,14,452,92);
+ txt(town.name,30,50,"#111827",24);
+ txt("ボス: "+town.boss,30,78,"#475569",16,"800");
+
+ rr(14,116,452,118);
+ txt(state.player.name,30,148);
+ txt(`${state.player.gender==="boy"?"男の子":"女の子"} / バッジ ${state.player.badges}/8`,30,176,"#475569",15,"800");
+ txt(`お金 ${state.player.money}円 / ボール ${state.player.balls} / 回復 ${state.player.potions}`,30,204,"#475569",14,"800");
+
+ rr(14,244,452,178);
+ txt("先頭モンスター",30,276);
+ txt(`${mon.nickname} Lv${mon.level}`,30,306,"#111827",20);
+ tag(SPECIES_BY_ID[mon.speciesId].type1,30,318);
+ hpbar(30,356,170,12,mon.currentHp/mon.stats.hp);
+ txt(`HP ${mon.currentHp}/${mon.stats.hp}`,30,390,"#475569",14,"800");
+
+ rr(14,432,452,274);
+ txt("A: ボスに挑む",30,468,"#dc2626",22);
+ txt("MENU: ルートへ出る",30,504,"#2563eb",20);
+ txt("B: 全回復",30,540,"#16a34a",20);
+ txt("左/右: 町確認",30,576,"#475569",16,"800");
+ txt("縦で全部見えるかの確認版",30,620,"#475569",16,"800");
+}
+
+function drawRoute(){
+ clear();
+ const prog=state.routeProgress[Math.min(state.player.town,7)];
+ rr(14,14,452,112);
+ txt(`ルート ${state.player.town+1}`,30,52,"#111827",24);
+ txt(`トレーナー ${prog.trainersDefeated}/5 撃破`,30,84,"#475569",16,"800");
+ txt(`次の町: ${TOWNS[Math.min(state.player.town+1,8)].name}`,30,112,"#475569",16,"800");
+
+ rr(14,138,452,256);
+ txt("A: 草むらを探索",30,176,"#16a34a",22);
+ txt("MENU: 次のトレーナー",30,214,"#dc2626",20);
+ txt("B: 町へ戻る",30,250,"#2563eb",20);
+ txt("5人撃破で次の町へ",30,288,"#475569",16,"800");
+
+ rr(14,406,452,300);
+ const mon=activeMon();
+ txt("手持ち",30,438);
+ txt(`${mon.nickname} Lv${mon.level}`,30,474,"#111827",20);
+ tag(SPECIES_BY_ID[mon.speciesId].type1,30,486);
+ hpbar(30,524,170,12,mon.currentHp/mon.stats.hp);
+ txt(`HP ${mon.currentHp}/${mon.stats.hp}`,30,558,"#475569",14,"800");
+}
+
+function drawBattle(){
+ const b=state.battle, me=b.player, enemy=b.enemy;
+ clear();
+ ctx.fillStyle="#8ec9ff"; ctx.fillRect(14,14,452,150);
+ ctx.fillStyle="#5ea84f"; ctx.fillRect(14,88,452,76);
+ ctx.fillStyle="rgba(51,102,35,.35)";
+ ctx.beginPath(); ctx.ellipse(100,124,78,22,0,0,Math.PI*2); ctx.fill();
+ ctx.beginPath(); ctx.ellipse(360,72,74,20,0,0,Math.PI*2); ctx.fill();
+
+ ctx.fillStyle=TYPE_COLORS[SPECIES_BY_ID[me.speciesId].type1]; ctx.beginPath(); ctx.arc(102,108,30,0,Math.PI*2); ctx.fill();
+ ctx.fillStyle=TYPE_COLORS[SPECIES_BY_ID[enemy.speciesId].type1]; ctx.beginPath(); ctx.arc(358,60,30,0,Math.PI*2); ctx.fill();
+ txt(me.nickname.slice(0,2),102,114,"#fff",16,"900","center");
+ txt(enemy.nickname.slice(0,2),358,66,"#fff",16,"900","center");
+
+ rr(18,18,180,66);
+ txt(`${enemy.nickname} Lv${enemy.level}`,28,44);
+ hpbar(28,58,150,10,enemy.currentHp/enemy.stats.hp);
+
+ rr(268,92,194,70);
+ txt(`${me.nickname} Lv${me.level}`,278,118);
+ hpbar(278,132,160,10,me.currentHp/me.stats.hp);
+
+ rr(14,176,452,110);
+ txt(b.log,28,206,"#111827",16,"900");
+ txt("A: 技 / MENU: 捕獲 or 次 / B: 回復",28,246,"#475569",13,"800");
+
+ rr(14,298,452,408);
+ txt("技",28,330);
+ b.player.moves.forEach((m,i)=>{
+   const mv=MOVE_BY_ID[m.id], y=360+i*78;
+   ctx.fillStyle = i===b.moveIndex ? "#dbe8ff" : "#ffffff";
+   rr(26,y-22,428,58,12,ctx.fillStyle,"#dbe2ef");
+   txt(mv.name,42,y,"#111827",16,"900");
+   txt(`${TYPE_JP[mv.type]} / PP ${m.pp}/${mv.pp}`,436,y,"#475569",13,"800","right");
+ });
+ if(b.effectFlash>0){
+   ctx.fillStyle = (TYPE_COLORS[b.effectType] || "#ffffff") + "66";
+   ctx.fillRect(0,0,canvas.width,canvas.height);
+ }
+}
+
+function startGame(){
+ state.player.roster=[createMon(state.selectedStarter || "mon_1",5)];
+ state.scene="hub";
+}
+function startWildBattle(){
+ const fam=rand(50), stage=(Math.random()>0.8?1:0), speciesId="mon_"+(fam*3+stage+1), level=3+rand(6);
+ state.battle={mode:"wild", player:JSON.parse(JSON.stringify(activeMon())), enemy:createMon(speciesId,level), log:"野生のモンスターが現れた！", moveIndex:0, effectFlash:0, effectType:"normal"};
+ state.scene="battle";
+}
+function startTrainerBattle(){
+ const routeIndex=Math.min(state.player.town,7), prog=state.routeProgress[routeIndex], fam=(routeIndex*6+prog.trainersDefeated)%50;
+ const speciesId="mon_"+(fam*3+1), level=8 + routeIndex*6 + prog.trainersDefeated;
+ state.battle={mode:"trainer", player:JSON.parse(JSON.stringify(activeMon())), enemy:createMon(speciesId,level), log:"トレーナーが勝負をしかけてきた！", moveIndex:0, effectFlash:0, effectType:"normal"};
+ state.scene="battle";
+}
+function startBossBattle(){
+ const town=TOWNS[state.player.town], matching=SPECIES.filter(s=>s.type1===town.type), speciesId=pick(matching).id;
+ state.battle={mode:"boss", player:JSON.parse(JSON.stringify(activeMon())), enemy:createMon(speciesId,town.level), log:`${town.boss} が勝負をしかけてきた！`, moveIndex:0, effectFlash:0, effectType:"normal"};
+ state.scene="battle";
+}
+function usePotion(){
+ const b=state.battle, me=b.player;
+ if(state.player.potions<=0){ b.log="きずぐすりがない！"; return; }
+ if(me.currentHp>=me.stats.hp){ b.log="HPは満タンだ"; return; }
+ state.player.potions--;
+ me.currentHp=Math.min(me.stats.hp, me.currentHp+52);
+ b.log=`${me.nickname} のHPが回復した！`;
+ enemyTurn();
+}
+function catchMonster(){
+ if(state.battle.mode!=="wild") return;
+ if(state.player.balls<=0){ state.battle.log="ボールがない！"; return; }
+ state.player.balls--;
+ const me=state.battle.player, enemy=state.battle.enemy;
+ const rate=clamp(0.38 + (1-enemy.currentHp/enemy.stats.hp)*0.45 - Math.max(0, enemy.level-me.level)*0.01, 0.12, 0.92);
+ if(Math.random()<rate){
+   if(state.player.roster.length<99) state.player.roster.push(JSON.parse(JSON.stringify(enemy)));
+   state.battle.log=`${enemy.nickname} を捕まえた！`;
+   state.scene="route";
+ } else {
+   state.battle.log=`${enemy.nickname} は飛び出した！`;
+   enemyTurn();
+ }
+}
+function doMove(attacker, defender, moveState){
+ const move=MOVE_BY_ID[moveState.id];
+ if(moveState.pp<=0) return `${move.name} はPP切れだ！`;
+ moveState.pp--;
+ if(Math.random()*100 > (move.accuracy||100)) return `${attacker.nickname} の ${move.name}！ しかし外れた！`;
+ if(move.cat==="status"){
+   if(move.effect==="heal"){
+     const heal=Math.floor(attacker.stats.hp*0.35);
+     attacker.currentHp=Math.min(attacker.stats.hp, attacker.currentHp+heal);
+     return `${attacker.nickname} の ${move.name}！ HPが ${heal} 回復した。`;
+   }
+   if(move.effect==="sleep"){
+     defender.status="sleep"; defender.statusTurns=1+rand(3);
+     return `${defender.nickname} は眠ってしまった！`;
+   }
+ }
+ let dmg=Math.max(2, Math.floor((move.power + attacker.level*1.8 + attacker.stats.atk*0.85 - defender.stats.def*0.4)*(0.88+Math.random()*0.24)));
+ const asp=SPECIES_BY_ID[attacker.speciesId], dsp=SPECIES_BY_ID[defender.speciesId];
+ let mult=typeMult(move.type,dsp.type1)*(dsp.type2?typeMult(move.type,dsp.type2):1);
+ if(move.type===asp.type1 || move.type===asp.type2) mult*=1.15;
+ dmg=Math.max(1, Math.floor(dmg*mult));
+ defender.currentHp=Math.max(0, defender.currentHp-dmg);
+ state.battle.effectType=move.type;
+ state.battle.effectFlash=4;
+ let txt=`${attacker.nickname} の ${move.name}！ ${dmg} ダメージ！`;
+ if(mult>=1.5) txt+=" 効果はばつぐんだ！";
+ if(mult<=0.5) txt+=" 効果はいまひとつだ。";
+ return txt;
+}
+function enemyTurn(){
+ const b=state.battle;
+ if(!b || b.enemy.currentHp<=0 || b.player.currentHp<=0) return;
+ const move=pick(b.enemy.moves.filter(m=>m.pp>0));
+ b.log=doMove(b.enemy,b.player,move);
+ if(b.player.currentHp<=0){
+   b.log=`${b.player.nickname} は倒れた…`;
+   state.player.roster[0].currentHp = state.player.roster[0].stats.hp;
+   state.scene = b.mode==="wild" ? "route" : "hub";
+ }
+}
+function winBattle(){
+ const b=state.battle, gain=16 + b.enemy.level*7;
+ gainExp(b.player,gain);
+ state.player.roster[0]=JSON.parse(JSON.stringify(b.player));
+ if(b.mode==="wild"){ state.player.money += 30 + b.enemy.level*8; state.scene="route"; }
+ else if(b.mode==="trainer"){ state.routeProgress[Math.min(state.player.town,7)].trainersDefeated++; state.player.money += 180 + state.player.town*70; state.scene="route"; }
+ else if(b.mode==="boss"){ state.player.badges=Math.min(8,state.player.badges+1); state.player.money += 500 + state.player.town*180; state.scene="hub"; }
+}
+function useSelectedMove(){
+ const b=state.battle, myMove=b.player.moves[b.moveIndex], enemyMove=pick(b.enemy.moves.filter(m=>m.pp>0));
+ const first=b.player.stats.spd>=b.enemy.stats.spd;
+ const order=first?[[b.player,b.enemy,myMove],[b.enemy,b.player,enemyMove]]:[[b.enemy,b.player,enemyMove],[b.player,b.enemy,myMove]];
+ for(const [a,d,m] of order){
+   if(a.currentHp<=0||d.currentHp<=0) continue;
+   if(a.status==="sleep"){
+     a.statusTurns--;
+     b.log=`${a.nickname} は眠っている！`;
+     if(a.statusTurns<=0) a.status=null;
+     continue;
+   }
+   b.log=doMove(a,d,m);
+   if(d.currentHp<=0) break;
+ }
+ if(b.enemy.currentHp<=0) winBattle();
+ else if(b.player.currentHp<=0){ b.log=`${b.player.nickname} は倒れた…`; state.scene=b.mode==="wild"?"route":"hub"; state.player.roster[0].currentHp = state.player.roster[0].stats.hp; }
+}
+function nextTown(){ if(state.player.town<8){ state.player.town++; state.player.roster[0].currentHp=state.player.roster[0].stats.hp; state.scene="hub"; } }
+
+function pressA(){ if(state.scene==="title") startGame(); else if(state.scene==="hub") startBossBattle(); else if(state.scene==="route") startWildBattle(); else if(state.scene==="battle") useSelectedMove(); }
+function pressB(){ if(state.scene==="title"){ state.player.gender = state.player.gender==="boy"?"girl":"boy"; } else if(state.scene==="hub"){ state.player.roster.forEach(m=>m.currentHp=m.stats.hp); } else if(state.scene==="route"){ state.scene="hub"; } else if(state.scene==="battle"){ usePotion(); } }
+function pressMenu(){ if(state.scene==="hub") state.scene="route"; else if(state.scene==="route"){ const prog=state.routeProgress[Math.min(state.player.town,7)]; if(prog.trainersDefeated>=5) nextTown(); else startTrainerBattle(); } else if(state.scene==="battle" && state.battle.mode==="wild") catchMonster(); }
+function pressLeft(){ if(state.scene==="title"){ state.selectedStarter="mon_1"; } else if(state.scene==="battle"){ state.battle.moveIndex=Math.max(0,state.battle.moveIndex-1); } else if(state.scene==="hub"){ state.player.town=Math.max(0,state.player.town-1); } }
+function pressRight(){ if(state.scene==="title"){ state.selectedStarter="mon_7"; } else if(state.scene==="battle"){ state.battle.moveIndex=Math.min(state.battle.player.moves.length-1,state.battle.moveIndex+1); } else if(state.scene==="hub"){ state.player.town=Math.min(8,state.player.town+1); } }
+
+let lock=0;
+function updateInput(){
+ if(lock>0){ lock--; return; }
+ if(input.a){ pressA(); lock=10; }
+ else if(input.b||input.back){ pressB(); lock=10; }
+ else if(input.menu){ pressMenu(); lock=10; }
+ else if(input.left){ pressLeft(); lock=8; }
+ else if(input.right){ pressRight(); lock=8; }
+}
+function loop(){
+ updateInput();
+ if(state.battle && state.battle.effectFlash>0) state.battle.effectFlash--;
+ clear();
+ if(state.scene==="title") drawTitle();
+ else if(state.scene==="hub") drawHub();
+ else if(state.scene==="route") drawRoute();
+ else if(state.scene==="battle") drawBattle();
+ save();
+ requestAnimationFrame(loop);
+}
+if(!state.player.roster.length) state.selectedStarter = state.selectedStarter || "mon_1";
+loop();
+})();
+</script>
+</body>
+</html>
